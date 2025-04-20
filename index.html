@@ -115,10 +115,11 @@
       margin: 0 20px;
     }
 
+    /* Add styles for the alert counter above the alert bar */
     #alertCounter {
       position: absolute;
-      top: 160px;
-      right: 10px;
+      top: 100px; /* Adjusted position to appear above the alert bar */
+      left: 10px;
       background: rgba(0, 0, 0, 0.7);
       color: white;
       padding: 15px;
@@ -169,7 +170,7 @@
     <div id="alertText">Loading weather alerts...</div>
   </div>
 
-  <!-- Counter Section -->
+  <!-- Counter Section (Above Alert Bar) -->
   <div id="alertCounter">
     <h3>Weather Alerts</h3>
     <div><strong>Thunderstorm Warnings:</strong> <span id="thunderstormCount">0</span></div>
@@ -338,7 +339,8 @@
     }
 
     loadAlerts();
-    setInterval(loadAlerts, 60000); // Reload alerts every minute
+    setInterval(loadAlerts, 60000); // Refresh the alerts every minute
   </script>
 </body>
 </html>
+
