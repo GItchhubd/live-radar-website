@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Live Radar with Speed Control</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    html, body, #map {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+    }
+
+    #timestamp {
+      position: absolute;
+      top: 30px;
+      left: 10px;
+      background: yellow;
+      color: black;
+      padding: 12px 20px;
+      font-size: 20px; /* Original font size */
+      font-family: monospace;
+      border-radius: 6px;
+      z-index: 1000;
+      font-weight: bold;
+    }
+
+    #controls {
+      position: absolute;
+      top: 70px;
+      right: 10px;
+      z-index: 1000;
+      background: rgba(0,0,0,0.6);
+      padding: 6px 12px;
+      border-radius: 6px;
+    }
+
+    #controls button {
+      margin: 5px 5px;
+      padding: 4px 10px;
+      font-size: 16px; /* Button text original size */
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    #legend {
+      position: absolute;
+      top: 120px;
+      right: 10px;
+      background: rgba(0, 0, 0, 0.6);
+      color: white;
+      padding: 15px;
+      font-family: sans-serif;
+      border-radius: 6px;
+      z-index: 1000;
+      width: 250px;
+    }
+
+    #legend h4 {
+      margin-top: 0;
+      font-size: 18px;
+      text-align: center;
+    }
+
+    #legend div {
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      font-size: 16px;
+    }
+
+    #legend div span {
+      width: 25px;
+      height: 25px;
+      display: inline-block;
+      margin-right: 15px;
+    }
+
+    #frameSelector {
+      margin-top: 8px;
+      font-size: 14px;
+      width: 100%;
+    }
+
+    #drawCanvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 900;
+      pointer-events: none;
+    }
+
+    #alertBar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      background: #c62828;
+      color: white;
+      font-family: sans-serif;
+      font-size: 20px; /* Original font size */
+      padding: 20px 40px;
+      z-index: 1000;
+      overflow-x: hidden;
+      white-space: nowrap;
+      text-align: center;
+      transition: transform 1s ease-in-out;
+    }
+
+    #alertBar div {
+      display: inline-block;
+      margin: 0 20px;
+    }
+  </style>
+</head>
+<body>
+  <div id="timestamp">Loading time...</div>
+  <div id="controls">
+    <button onclick="changeSpeed(250)">⏪ Slower</button>
+    <button onclick="changeSpeed(-250)">⏩ Faster</button>
+    <button onclick="togglePause()">⏸️ Pause</button>
+    <button onclick="toggleLegend()">🗺️ Toggle Legend</button>
+    <select id="frameSelector" onchange="selectFrame(this.value)">
+      <option value="">Select Frame</option>
+    </select>
+    <button onclick="toggleDraw()">✏️ Annotate</button>
+    <button onclick="clearCanvas()">🧼 Clear</button>
+  </div>
+  <div id="map"></div>
+
+  <!-- Map Legend -->
+  <div id="legend">
+    <h4>Precipitation Intensity</h4>
+    <div><span style="background-color: #0000FF;"></span><span>Light</span></div>
+    <div><span style="background-color: #FFFF00;"></span><span>Moderate</span></div>
+    <div><span style="background-color: #FFA500;"></span><span>Heavy</span></div>
+    <div><span style="background-color: #FF0000;"></span><span>Very Heavy</span></div>
+    <div><span style="background-color: #800080;"></span><span>Extreme</span></div>
+  </div>
+
+  <canvas id="drawCanvas"></canvas>
+  <div id="alertBar">
+    <div id="alertText">Loading weather alerts...</div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const map = L.map('map').setView([39.9612, -82.9988], 7); // Columbus
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "© OpenStreetMap contributors"
+    }).addTo(map);
+
+    const timestampBox = document.getElementById("timestamp");
+    const alertTextElement = document.getElementById("alertText");
+    const frameSelector = document.getElementById("frameSelector");
+
+    let frames = [];
+    let frameIndex = 0;
+    let speed = 1000;
+    let radarLayer = null;
+    let animationInterval = null;
+    let isPaused = false;
+
+    async function loadRadarFrames() {
+      const res = await fetch("https://api.rainviewer.com/public/weather-maps.json");
+      const data = await res.json();
+      return data.radar.past;
+    }
+
+    function showRadarFrame(frame) {
+      if (radarLayer) map.removeLayer(radarLayer);
+      const url = `https://tilecache.rainviewer.com/v2/radar/${frame.path}/256/{z}/{x}/{y}/2/1_1.png`;
+      radarLayer = L.tileLayer(url, {
+        tileSize: 256,
+        opacity: 0.6
+      }).addTo(map);
+
+      const frameTime = new Date(frame.time * 1000);
+      timestampBox.textContent = "Radar Time: " + frameTime.toLocaleTimeString();
+    }
+
+    function animateRadar() {
+      if (animationInterval) clearInterval(animationInterval);
+      animationInterval = setInterval(() => {
+        if (!isPaused) {
+          showRadarFrame(frames[frameIndex]);
+          frameSelector.value = frameIndex;
+          frameIndex = (frameIndex + 1) % frames.length;
+        }
+      }, speed);
+    }
+
+    function togglePause() {
+      isPaused = !isPaused;
+    }
+
+    function changeSpeed(delta) {
+      speed = Math.max(250, speed + delta);
+      animateRadar();
+    }
+
+    function selectFrame(index) {
+      isPaused = true;
+      frameIndex = parseInt(index);
+      showRadarFrame(frames[frameIndex]);
+    }
+
+    function toggleLegend() {
+      const legend = document.getElementById("legend");
+      legend.style.display = legend.style.display === "none" ? "block" : "none";
+    }
+
+    // Load frames and setup
+    loadRadarFrames().then(loadedFrames => {
+      frames = loadedFrames;
+      frames.forEach((frame, i) => {
+        const opt = document.createElement("option");
+        opt.value = i;
+        const time = new Date(frame.time * 1000).toLocaleTimeString();
+        opt.text = `Frame ${i + 1}: ${time}`;
+        frameSelector.appendChild(opt);
+      });
+      animateRadar();
+    });
+
+    // === Drawing Canvas ===
+    let drawing = false;
+    let isDrawingMode = false;
+    const canvas = document.getElementById('drawCanvas');
+    const ctx = canvas.getContext('2d');
+
+    function resizeCanvas() {
+      canvas.width = map.getSize().x;
+      canvas.height = map.getSize().y;
+    }
+
+    map.on('resize move zoom', resizeCanvas);
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    function toggleDraw() {
+      isDrawingMode = !isDrawingMode;
+      canvas.style.pointerEvents = isDrawingMode ? 'auto' : 'none';
+      canvas.style.zIndex = isDrawingMode ? 999 : 900;
+    }
+
+    function clearCanvas() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    canvas.addEventListener('mousedown', (e) => {
+      if (!isDrawingMode) return;
+      drawing = true;
+      ctx.strokeStyle = 'red';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(e.offsetX, e.offsetY);
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (drawing && isDrawingMode) {
+        ctx.lineTo(e.offsetX, e.offsetY);
+        ctx.stroke();
+      }
+    });
+
+    canvas.addEventListener('mouseup', () => drawing = false);
+    canvas.addEventListener('mouseleave', () => drawing = false);
+
+    // === NWS Alerts ===
+    async function loadAlerts() {
+      try {
+        const res = await fetch("https://api.weather.gov/alerts/active");
+        const data = await res.json();
+
+        const alerts = data.features.map(alert => {
+          const area = alert.properties.areaDesc;
+          const headline = alert.properties.headline;
+          return `${headline} [${area}]`;
+        });
+
+        if (alerts.length > 0) {
+          let index = 0;
+          alertTextElement.textContent = alerts[index];
+          setInterval(() => {
+            index = (index + 1) % alerts.length;
+            alertTextElement.textContent = alerts[index];
+          }, 5000); // Change alert every 5 seconds
+        } else {
+          alertTextElement.textContent = "✅ No active alerts.";
+        }
+      } catch (err) {
+        alertTextElement.textContent = "⚠️ Failed to load alerts.";
+        console.error("Alert loading error:", err);
+      }
+    }
+
+    loadAlerts();
+    setInterval(loadAlerts, 300000); // Refresh every 5 min
+  </script>
+</body>
+</html>
