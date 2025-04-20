@@ -19,7 +19,7 @@
       background: yellow;
       color: black;
       padding: 12px 20px;
-      font-size: 20px; /* Original font size */
+      font-size: 20px;
       font-family: monospace;
       border-radius: 6px;
       z-index: 1000;
@@ -39,7 +39,7 @@
     #controls button {
       margin: 5px 5px;
       padding: 4px 10px;
-      font-size: 16px; /* Button text original size */
+      font-size: 16px;
       border: none;
       border-radius: 4px;
       cursor: pointer;
@@ -93,6 +93,19 @@
       pointer-events: none;
     }
 
+    #alertCounter {
+      position: absolute;
+      bottom: 90px;
+      left: 10px;
+      background: #222;
+      color: white;
+      font-family: sans-serif;
+      padding: 10px 15px;
+      font-size: 16px;
+      border-radius: 6px;
+      z-index: 1000;
+    }
+
     #alertBar {
       position: absolute;
       bottom: 0;
@@ -101,7 +114,7 @@
       background: #c62828;
       color: white;
       font-family: sans-serif;
-      font-size: 20px; /* Original font size */
+      font-size: 20px;
       padding: 20px 40px;
       z-index: 1000;
       overflow-x: hidden;
@@ -114,32 +127,10 @@
       display: inline-block;
       margin: 0 20px;
     }
-
-    #warningCounter {
-      position: absolute;
-      top: 70px;
-      left: 10px;
-      background: rgba(0,0,0,0.6);
-      color: white;
-      padding: 10px;
-      font-family: sans-serif;
-      font-size: 18px;
-      border-radius: 6px;
-      z-index: 1000;
-    }
-
-    #warningCounter div {
-      margin: 5px;
-    }
-
   </style>
 </head>
 <body>
   <div id="timestamp">Loading time...</div>
-  <div id="warningCounter">
-    <div><strong>Thunderstorm Warnings:</strong> <span id="thunderstormCount">0</span></div>
-    <div><strong>Tornado Warnings:</strong> <span id="tornadoCount">0</span></div>
-  </div>
   <div id="controls">
     <button onclick="changeSpeed(250)">⏪ Slower</button>
     <button onclick="changeSpeed(-250)">⏩ Faster</button>
@@ -151,9 +142,9 @@
     <button onclick="toggleDraw()">✏️ Annotate</button>
     <button onclick="clearCanvas()">🧼 Clear</button>
   </div>
+
   <div id="map"></div>
 
-  <!-- Map Legend -->
   <div id="legend">
     <h4>Precipitation Intensity</h4>
     <div><span style="background-color: #0000FF;"></span><span>Light</span></div>
@@ -164,13 +155,14 @@
   </div>
 
   <canvas id="drawCanvas"></canvas>
+  <div id="alertCounter">Loading counts...</div>
   <div id="alertBar">
     <div id="alertText">Loading weather alerts...</div>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    const map = L.map('map').setView([39.9612, -82.9988], 7); // Columbus
+    const map = L.map('map').setView([39.9612, -82.9988], 7);
 
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "© OpenStreetMap contributors"
@@ -178,9 +170,8 @@
 
     const timestampBox = document.getElementById("timestamp");
     const alertTextElement = document.getElementById("alertText");
+    const alertCounterElement = document.getElementById("alertCounter");
     const frameSelector = document.getElementById("frameSelector");
-    const thunderstormCountElement = document.getElementById("thunderstormCount");
-    const tornadoCountElement = document.getElementById("tornadoCount");
 
     let frames = [];
     let frameIndex = 0;
@@ -198,11 +189,7 @@
     function showRadarFrame(frame) {
       if (radarLayer) map.removeLayer(radarLayer);
       const url = `https://tilecache.rainviewer.com/v2/radar/${frame.path}/256/{z}/{x}/{y}/2/1_1.png`;
-      radarLayer = L.tileLayer(url, {
-        tileSize: 256,
-        opacity: 0.6
-      }).addTo(map);
-
+      radarLayer = L.tileLayer(url, { tileSize: 256, opacity: 0.6 }).addTo(map);
       const frameTime = new Date(frame.time * 1000);
       timestampBox.textContent = "Radar Time: " + frameTime.toLocaleTimeString();
     }
@@ -238,7 +225,6 @@
       legend.style.display = legend.style.display === "none" ? "block" : "none";
     }
 
-    // Load frames and setup
     loadRadarFrames().then(loadedFrames => {
       frames = loadedFrames;
       frames.forEach((frame, i) => {
@@ -251,28 +237,70 @@
       animateRadar();
     });
 
-    // === NWS Alerts ===
+    // Drawing
+    let drawing = false;
+    let isDrawingMode = false;
+    const canvas = document.getElementById('drawCanvas');
+    const ctx = canvas.getContext('2d');
+
+    function resizeCanvas() {
+      canvas.width = map.getSize().x;
+      canvas.height = map.getSize().y;
+    }
+
+    map.on('resize move zoom', resizeCanvas);
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    function toggleDraw() {
+      isDrawingMode = !isDrawingMode;
+      canvas.style.pointerEvents = isDrawingMode ? 'auto' : 'none';
+      canvas.style.zIndex = isDrawingMode ? 999 : 900;
+    }
+
+    function clearCanvas() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    canvas.addEventListener('mousedown', (e) => {
+      if (!isDrawingMode) return;
+      drawing = true;
+      ctx.strokeStyle = 'red';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(e.offsetX, e.offsetY);
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (drawing && isDrawingMode) {
+        ctx.lineTo(e.offsetX, e.offsetY);
+        ctx.stroke();
+      }
+    });
+
+    canvas.addEventListener('mouseup', () => drawing = false);
+    canvas.addEventListener('mouseleave', () => drawing = false);
+
+    // Alerts
     async function loadAlerts() {
       try {
         const res = await fetch("https://api.weather.gov/alerts/active");
         const data = await res.json();
 
-        const alerts = data.features.map(alert => {
-          const area = alert.properties.areaDesc;
-          const headline = alert.properties.headline;
-          return `${headline} [${area}]`;
-        });
-
         let thunderstormCount = 0;
         let tornadoCount = 0;
 
-        data.features.forEach(alert => {
-          if (alert.properties.event.includes("Thunderstorm")) thunderstormCount++;
-          if (alert.properties.event.includes("Tornado")) tornadoCount++;
+        const alerts = data.features.map(alert => {
+          const area = alert.properties.areaDesc;
+          const headline = alert.properties.headline;
+
+          if (/severe thunderstorm warning/i.test(headline)) thunderstormCount++;
+          if (/tornado warning/i.test(headline)) tornadoCount++;
+
+          return `${headline} [${area}]`;
         });
 
-        thunderstormCountElement.textContent = thunderstormCount;
-        tornadoCountElement.textContent = tornadoCount;
+        alertCounterElement.textContent = `⛈️ Thunderstorm Warnings: ${thunderstormCount} | 🌪️ Tornado Warnings: ${tornadoCount}`;
 
         if (alerts.length > 0) {
           let index = 0;
@@ -280,18 +308,20 @@
           setInterval(() => {
             index = (index + 1) % alerts.length;
             alertTextElement.textContent = alerts[index];
-          }, 5000); // Change alert every 5 seconds
+          }, 5000);
         } else {
           alertTextElement.textContent = "✅ No active alerts.";
         }
       } catch (err) {
         alertTextElement.textContent = "⚠️ Failed to load alerts.";
+        alertCounterElement.textContent = "⚠️ Could not load alert counts.";
         console.error("Alert loading error:", err);
       }
     }
 
     loadAlerts();
-    setInterval(loadAlerts, 300000); // Refresh every 5 min
+    setInterval(loadAlerts, 300000); // every 5 minutes
   </script>
 </body>
 </html>
+
